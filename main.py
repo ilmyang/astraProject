@@ -10,15 +10,9 @@ depth_height = 480
 
 # 初始时间
 last_detection_time = None  # 记录上次检测到小球的时间
-# 记录前几帧的轮廓信息
-last_radii = []
-last_areas = []
-last_centers = []  # 记录小球中心位置
-MAX_HISTORY = 5  # 保存前5帧的小球信息
-
 
 def detect_circles_by_contours(frame):
-    global last_radii, last_areas, last_centers  # 使用全局变量来存储历史半径、面积和中心位置
+    global last_detection_time  # 使用全局变量来存储时间
 
     # 转换为灰度图像
     gray_image = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -28,70 +22,53 @@ def detect_circles_by_contours(frame):
     filtered_image = cv2.bilateralFilter(blurred_image, 9, 75, 75)
     morphed_image = cv2.morphologyEx(filtered_image, cv2.MORPH_CLOSE, kernel)
     # 使用Canny算子检测边缘
-    edges = cv2.Canny(morphed_image, 45, 170)
+    edges = cv2.Canny(morphed_image, 30, 150)
 
-    # 查找边缘的轮廓
+
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     circularity_threshold = 0.85  # 圆形度阈值
-    found_ball = False
 
     for contour in contours:
+        # 过滤掉过小或过大的轮廓，避免无效的计算
         area = cv2.contourArea(contour)
-        if area < math.pi * 4 * 4 or area > math.pi * 20 * 20:  # 根据具体情况调整面积阈值
+        if area < math.pi * 4 * 4 or area > math.pi * 15 * 15:  # 面积阈值根据具体情况调整
             continue
+
         perimeter = cv2.arcLength(contour, True)
-
-        if perimeter == 0:  # 防止除以0 错误
+        if perimeter == 0:
             continue
 
-        # 计算圆形度
         circularity = 4 * math.pi * area / (perimeter * perimeter)
 
         if circularity > circularity_threshold:
-            # 计算最小包围圆
+            # 计算最小包围圆并进行进一步过滤
             (x, y), radius = cv2.minEnclosingCircle(contour)
 
-            # 过滤掉半径过小或过大的圆
-            if radius > 20 or radius <= 4:
+            if radius > 15 or radius <= 4:
                 continue
 
             # 画圆和中心点
             center = (int(x), int(y))
+            #cv2.circle(frame, center, int(radius), (0, 255, 0), 2)
             cv2.circle(frame, center, int(radius), (0, 0, 255), 1)
             cv2.circle(frame, center, 3, (0, 0, 255), -1)
 
-            print(f"Detected ball: ({x:.1f}, {y:.1f}) r: {radius:.1f}, circularity: {circularity:.3f}")
+            # 输出小球信息
+            print(f"({x:.1f}, {y:.1f}) r: {radius:.1f}, circularity: {circularity:.3f}", end='; ')
 
-            # 将当前帧的半径、面积和中心位置存入历史记录
-            last_radii.append(radius)
-            last_areas.append(area)
-            last_centers.append(center)
+            # 当前检测时间
+            current_time = time.time()
 
-            # 保证历史记录不会过多
-            if len(last_radii) > MAX_HISTORY:
-                last_radii.pop(0)
-                last_areas.pop(0)
-                last_centers.pop(0)
+            if last_detection_time is not None:
+                # 计算相邻检测的时间间隔
+                time_interval = current_time - last_detection_time
+                print(f"Time interval: {time_interval * 1000:.2f} ms")
 
-            found_ball = True
-            break
-
-    if not found_ball and len(last_radii) > 0:
-        # 如果当前帧没有检测到圆形轮廓，尝试根据历史信息补全
-        avg_radius = sum(last_radii) / len(last_radii)
-        avg_area = sum(last_areas) / len(last_areas)
-        avg_center = np.mean(last_centers, axis=0).astype(int)  # 计算历史中心位置的平均值
-
-        print(f"Predicted ball: {avg_center}, radius: {avg_radius:.1f}, area: {avg_area:.1f}")
-
-        # 使用历史信息绘制圆
-        cv2.circle(frame, tuple(avg_center), int(avg_radius), (0, 255, 0), 1)
-        cv2.circle(frame, tuple(avg_center), 3, (0, 255, 0), -1)
-
+            # 更新上次检测时间
+            last_detection_time = current_time
     cv2.imshow('Canny Edges', edges)
     return frame
-
 
 def mousecallback(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDBLCLK:
