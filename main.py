@@ -1,167 +1,129 @@
 from openni import openni2
-from openni import _openni2 as c_api
-from utils import plot_time_intervals
-import numpy as np
 import cv2
 import math
-import time  # 引入 time 模块
+import numpy as np
 import threading
 import queue
+import time  # 导入时间模块
+from gui import update_parameters
 
-depth_width = 640
-depth_height = 320
+# 初始参数设置
+blur_kernel = 3
+canny_low = 50
+canny_high = 175
+bilateral_d = 9
+bilateral_sigma_color = 75
+bilateral_sigma_space = 75
+display_mode = 0  # 0: 彩色, 1: 灰度, 2: HSV
+circularity_min = 0.85
+radius_min = 5
+radius_max = 30
 
-# 初始时间
-last_detection_time = None  # 记录上次检测到小球的时间
-# 在全局范围内定义一个计数器，用于跟踪时间间隔的索引
-interval_index = 0
 # 创建队列用于线程间通信
 data_queue = queue.Queue()
 
-
-
-# 当前显示的图像类型
-current_display = 1  # 0: depth, 1: color, 2: edges
+# 初始化小球信息
+ball_info = {
+    'position': (0, 0),
+    'radius': 0,
+    'circularity': 0,
+    'time_interval': 0
+}
+last_time = time.time()
 
 # 实时更新图像的线程函数
-
 def detect_circles_by_contours(frame):
-    global last_detection_time, interval_index  # 使用全局变量来存储时间
+    global blur_kernel, canny_low, canny_high, bilateral_d, bilateral_sigma_color, bilateral_sigma_space, display_mode
+    global circularity_min, radius_min, radius_max, ball_info, last_time  # 添加 ball_info 和 last_time
 
-    # 转换为灰度图像
-    gray_image = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    # 应用高斯模糊减少噪声
-    blurred_image = cv2.GaussianBlur(gray_image, (7, 7), 0)
-    kernel = np.ones((5, 5), np.uint8)
-    filtered_image = cv2.bilateralFilter(blurred_image, 9, 75, 75)
-    morphed_image = cv2.morphologyEx(filtered_image, cv2.MORPH_CLOSE, kernel)
-    # 使用Canny算子检测边缘
-    edges = cv2.Canny(morphed_image, 30, 150)
+    # 检查并根据用户选择的显示模式调整图像格式
+    if display_mode == 1:  # 灰度模式
+        if len(frame.shape) == 3:  # 只有在彩色图像时才转换为灰度图像
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    elif display_mode == 2:  # HSV 模式
+        if len(frame.shape) == 3:  # 只有彩色图像能转换为 HSV
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    # 应用高斯模糊
+    if len(frame.shape) == 3:  # 如果是彩色或 HSV 图像
+        gray_image = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    else:
+        gray_image = frame  # 如果已经是灰度图像，直接使用
+
+    blurred_image = cv2.GaussianBlur(gray_image, (blur_kernel, blur_kernel), 0)
+    filtered_image = cv2.bilateralFilter(blurred_image, bilateral_d, bilateral_sigma_color, bilateral_sigma_space)
+    edges = cv2.Canny(filtered_image, canny_low, canny_high)
 
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    circularity_threshold = 0.85  # 圆形度阈值
-
     for contour in contours:
-        # 过滤掉过小或过大的轮廓，避免无效的计算
         area = cv2.contourArea(contour)
-        if area < math.pi * 4 * 4 or area > math.pi * 15 * 15:  # 面积阈值根据具体情况调整
+        if area < math.pi * radius_min * radius_min or area > math.pi * radius_max * radius_max:
             continue
-
         perimeter = cv2.arcLength(contour, True)
         if perimeter == 0:
             continue
-
-        circularity = 4 * math.pi * area / (perimeter * perimeter)
-
-        if circularity > circularity_threshold:
-            # 计算最小包围圆并进行进一步过滤
+        circularity = 4 * np.pi * area / (perimeter * perimeter)
+        if circularity > circularity_min:
             (x, y), radius = cv2.minEnclosingCircle(contour)
+            if radius_min < radius < radius_max:
+                ball_info['position'] = (int(x), int(y))
+                ball_info['radius'] = int(radius)
+                ball_info['circularity'] = circularity
 
-            if radius > 15 or radius <= 4:
-                continue
+                # 计算帧率
+                current_time = time.time()
+                if last_time != current_time:  # 防止除以零
+                    ball_info['time_interval'] = 1 / (current_time - last_time)
+                last_time = current_time
 
-            # 画圆和中心点
-            center = (int(x), int(y))
-            cv2.circle(frame, center, int(radius), (0, 0, 255), 1)
-            cv2.circle(frame, center, 3, (0, 0, 255), -1)
+                center = (int(x), int(y))
+                cv2.circle(frame, center, int(radius), (0, 0, 255), 2)
 
-            # 输出小球信息
-            print(f"{interval_index}:({x:.1f}, {y:.1f}) r: {radius:.1f}, circularity: {circularity:.3f}", end='; ')
+    return frame
 
-            # 当前检测时间
-            current_time = time.time()
+def update_callback(new_params):
+    global blur_kernel, canny_low, canny_high, bilateral_d, bilateral_sigma_color, bilateral_sigma_space, display_mode
 
-            if last_detection_time is not None:
-                # 计算相邻检测的时间间隔
-                time_interval = current_time - last_detection_time
-                print(f"Time interval: {time_interval * 1000:.2f} ms")
-                data_queue.put(time_interval * 1000)
-                interval_index += 1
-            # 更新上次检测时间
-            last_detection_time = current_time
+    # 确保参数在合适的范围内
+    blur_kernel = max(3, new_params['blur_kernel']) if new_params['blur_kernel'] % 2 == 1 else new_params['blur_kernel'] + 1
+    canny_low = max(10, min(100, new_params['canny_low']))
+    canny_high = max(100, min(300, new_params['canny_high']))
+    bilateral_d = max(1, min(15, new_params['bilateral_d']))
+    bilateral_sigma_color = max(50, min(150, new_params['bilateral_sigma_color']))
+    bilateral_sigma_space = max(50, min(150, new_params['bilateral_sigma_space']))
+    display_mode = new_params['display_mode']
 
-    #cv2.imshow('Canny Edges', edges)
-    return frame, edges
-
-def mousecallback(event, x, y, flags, param):
-    if event == cv2.EVENT_LBUTTONDBLCLK:
-        print(y, x, dpt[y, x])
+    # 新增参数处理
+    circularity_min = max(0.0, min(1.0, new_params['circularity_min']))
+    radius_min = max(1, new_params['radius_min'])
+    radius_max = max(radius_min, new_params['radius_max'])  # 确保最大半径大于最小半径
 
 if __name__ == "__main__":
     openni2.initialize()
 
-    dev = openni2.Device.open_any()
-    print(dev.get_device_info())
-
-    depth_stream = dev.create_depth_stream()
-    print(depth_stream.get_video_mode())
-    depth_stream.set_video_mode(c_api.OniVideoMode(pixelFormat=c_api.OniPixelFormat.ONI_PIXEL_FORMAT_DEPTH_1_MM,
-                                                   resolutionX=depth_width,
-                                                   resolutionY=depth_height, fps=30))
-    depth_stream.start()
-
     cap = cv2.VideoCapture(0)
-
     if not cap.isOpened():
         print("无法打开摄像头")
         exit()
 
-    #cv2.namedWindow('depth')
-    #cv2.setMouseCallback('depth', mousecallback)
+    # 启动 GUI 线程
+    gui_thread = threading.Thread(target=update_parameters, args=(update_callback, ball_info))
+    gui_thread.start()  # 启动 GUI 线程，但不使用 daemon
 
-    cv2.namedWindow('Display', cv2.WINDOW_AUTOSIZE)
-    cv2.setMouseCallback('Display', mousecallback)
-
-    # 创建绘图线程
-    plot_thread = threading.Thread(target=plot_time_intervals, args=(data_queue,))
-    plot_thread.daemon = True  # 设置为守护线程，确保主程序结束时自动结束
-    plot_thread.start()
-
-    #cv2.namedWindow('color', cv2.WINDOW_AUTOSIZE)
 
     while True:
-        frame = depth_stream.read_frame()
-
         ret, color_frame = cap.read()
         if not ret or color_frame is None:
             print("未能成功读取摄像头帧")
             continue
 
-        dframe_data = np.array(frame.get_buffer_as_triplet()).reshape([depth_height, depth_width, 2])
-        dpt1 = np.asarray(dframe_data[:, :, 0], dtype='float32')
-        dpt2 = np.asarray(dframe_data[:, :, 1], dtype='float32')
+        # 调用小球识别功能
+        processed_frame = detect_circles_by_contours(color_frame)
+        cv2.imshow('Display', processed_frame)
 
-        dpt2 = dpt2 * 255
-        dpt = dpt1 + dpt2
-        dpt = dpt[:, ::-1]
-        #cv2.imshow('depth', dpt)
-
-        # 在这里调用小球识别功能
-        processed_frame, edges = detect_circles_by_contours(color_frame)
-
-        # 根据当前显示的图像类型进行切换
-        if current_display == 0:
-            display_frame = dpt
-        elif current_display == 2:
-            display_frame = edges
-        else:
-            display_frame = processed_frame
-
-        cv2.imshow('Display', display_frame)
-
-        # 显示处理后的帧
-        #cv2.imshow('color', processed_frame)
-
-        # 检查键盘输入来切换显示图像
-        key = cv2.waitKey(1)
-        if int(key) == ord('t'):  # 按 't' 键切换图像
-            current_display = (current_display + 1) % 3  # 切换状态，循环0-2
-        if int(key) == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
     cap.release()
     cv2.destroyAllWindows()
-
-    depth_stream.stop()
-    dev.close()
