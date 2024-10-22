@@ -18,6 +18,8 @@ display_mode = 0  # 0: 彩色, 1: 灰度, 2: HSV
 circularity_min = 0.85
 radius_min = 5
 radius_max = 30
+lower_hsv = np.array([0, 0, 100])
+upper_hsv = np.array([83, 255, 255])
 
 # 创建队列用于线程间通信
 data_queue = queue.Queue()
@@ -27,9 +29,27 @@ ball_info = {
     'position': (0, 0),
     'radius': 0,
     'circularity': 0,
-    'time_interval': 0
+    'time_interval': 0,
+    'hsv': (0, 0, 0)
 }
 last_time = time.time()
+
+def detect_circles_by_hsv(frame):
+    # 转换为HSV色彩空间
+    hsv_image = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    
+    # 应用HSV阈值筛选
+    mask = cv2.inRange(hsv_image, lower_hsv, upper_hsv)
+    # 形态学操作：填充破裂的区域
+    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)  # 进行闭运算以修复小的断裂
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)   # 可选，移除小的噪声点
+    # 创建黑白图像：符合条件的区域变为白色，其余部分为黑色
+    binary_output = np.zeros_like(mask)
+    binary_output[mask > 0] = 255  # 将符合HSV范围的区域设置为白色
+    
+    return binary_output
+
 
 # 实时更新图像的线程函数
 def detect_circles_by_contours(frame):
@@ -49,8 +69,8 @@ def detect_circles_by_contours(frame):
         gray_image = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     else:
         gray_image = frame  # 如果已经是灰度图像，直接使用
-
-    blurred_image = cv2.GaussianBlur(gray_image, (blur_kernel, blur_kernel), 0)
+    hsv_mask = detect_circles_by_hsv(frame)
+    blurred_image = cv2.GaussianBlur(hsv_mask, (blur_kernel, blur_kernel), 0)
     filtered_image = cv2.bilateralFilter(blurred_image, bilateral_d, bilateral_sigma_color, bilateral_sigma_space)
     edges = cv2.Canny(filtered_image, canny_low, canny_high)
 
@@ -71,19 +91,24 @@ def detect_circles_by_contours(frame):
                 ball_info['radius'] = int(radius)
                 ball_info['circularity'] = circularity
 
+                # 获取中心像素的HSV值
+                hsv_value = frame[int(y), int(x)] if len(frame.shape) == 3 else (0, 0, 0)
+                ball_info['hsv'] = hsv_value
+
                 # 计算帧率
                 current_time = time.time()
                 if last_time != current_time:  # 防止除以零
                     ball_info['time_interval'] = 1 / (current_time - last_time)
                 last_time = current_time
-
+                #if (1.0 / 60) - current_time + last_time > 0:
+                    #time.sleep((1.0 / 30) - current_time + last_time)
                 center = (int(x), int(y))
                 cv2.circle(frame, center, int(radius), (0, 0, 255), 2)
 
     return frame
 
 def update_callback(new_params):
-    global blur_kernel, canny_low, canny_high, bilateral_d, bilateral_sigma_color, bilateral_sigma_space, display_mode
+    global blur_kernel, canny_low, canny_high, bilateral_d, bilateral_sigma_color, bilateral_sigma_space, display_mode,lower_hsv, upper_hsv
 
     # 确保参数在合适的范围内
     blur_kernel = max(3, new_params['blur_kernel']) if new_params['blur_kernel'] % 2 == 1 else new_params['blur_kernel'] + 1
@@ -93,6 +118,8 @@ def update_callback(new_params):
     bilateral_sigma_color = max(50, min(150, new_params['bilateral_sigma_color']))
     bilateral_sigma_space = max(50, min(150, new_params['bilateral_sigma_space']))
     display_mode = new_params['display_mode']
+    lower_hsv = (new_params['lower_h'], new_params['lower_s'], new_params['lower_v'])
+    upper_hsv = (new_params['upper_h'], new_params['upper_s'], new_params['upper_v'])
 
     # 新增参数处理
     circularity_min = max(0.0, min(1.0, new_params['circularity_min']))
@@ -117,6 +144,13 @@ if __name__ == "__main__":
         if not ret or color_frame is None:
             print("未能成功读取摄像头帧")
             continue
+        
+        # 检测符合HSV的小球区域并显示
+        hsv_mask_image = detect_circles_by_hsv(color_frame)
+        
+        # 显示图像
+        cv2.imshow('HSV Masked Image', hsv_mask_image)
+
 
         # 调用小球识别功能
         processed_frame = detect_circles_by_contours(color_frame)

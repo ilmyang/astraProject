@@ -13,6 +13,8 @@ params = {
     'circularity_min': 0.85,
     'radius_min': 5,
     'radius_max': 30,
+    'lower_hsv': [0, 0, 100],
+    'upper_hsv': [83, 255, 255],
 }
 
 def update_parameters(callback, ball_info):
@@ -81,6 +83,38 @@ def update_parameters(callback, ball_info):
     radius_max_slider.set(params['radius_max'])
     radius_max_slider.grid(row=2, column=1, padx=5, pady=0)
 
+    # 添加lower_hsv和upper_hsv调节控件
+    ttk.Label(root, text="Lower HSV - H").grid(row=11, column=0, padx=5, pady=0)
+    lower_h_slider = tk.Scale(root, from_=0, to=255, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'lower_h'))
+    lower_h_slider.set(params.get('lower_hsv', [0, 100, 100])[0])
+    lower_h_slider.grid(row=10, column=0, padx=5, pady=0)
+
+    ttk.Label(root, text="Lower HSV - S").grid(row=11, column=1, padx=5, pady=0)
+    lower_s_slider = tk.Scale(root, from_=0, to=255, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'lower_s'))
+    lower_s_slider.set(params.get('lower_hsv', [0, 100, 100])[1])
+    lower_s_slider.grid(row=10, column=1, padx=5, pady=0)
+
+    ttk.Label(root, text="Lower HSV - V").grid(row=11, column=2, padx=5, pady=0)
+    lower_v_slider = tk.Scale(root, from_=0, to=255, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'lower_v'))
+    lower_v_slider.set(params.get('lower_hsv', [0, 100, 100])[2])
+    lower_v_slider.grid(row=10, column=2, padx=5, pady=0)
+
+    ttk.Label(root, text="Upper HSV - H").grid(row=13, column=0, padx=5, pady=0)
+    upper_h_slider = tk.Scale(root, from_=0, to=255, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'upper_h'))
+    upper_h_slider.set(params.get('upper_hsv', [30, 255, 255])[0])
+    upper_h_slider.grid(row=12, column=0, padx=5, pady=0)
+
+    ttk.Label(root, text="Upper HSV - S").grid(row=13, column=1, padx=5, pady=0)
+    upper_s_slider = tk.Scale(root, from_=0, to=255, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'upper_s'))
+    upper_s_slider.set(params.get('upper_hsv', [30, 255, 255])[1])
+    upper_s_slider.grid(row=12, column=1, padx=5, pady=0)
+
+    ttk.Label(root, text="Upper HSV - V").grid(row=13, column=2, padx=5, pady=0)
+    upper_v_slider = tk.Scale(root, from_=0, to=255, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'upper_v'))
+    upper_v_slider.set(params.get('upper_hsv', [30, 255, 255])[2])
+    upper_v_slider.grid(row=12, column=2, padx=5, pady=0)
+
+
     # 显示模式选择
     mode_var = tk.IntVar(value=params['display_mode'])
     #ttk.Label(root, text="Display Mode").grid(row=8, column=0, padx=5, pady=0)
@@ -100,11 +134,13 @@ def update_parameters(callback, ball_info):
 
     # 更新小球信息的函数
     def update_ball_info():
+        hsv_value = ball_info.get('hsv', (0, 0, 0))
         info_text = (f"Position: {ball_info['position']}, "
                      f"Radius: {ball_info['radius']}, "
                      f"Circularity: {ball_info['circularity']:.2f}, "
+                     f"HSV: {hsv_value}, "
                      f"Frame Rate: {ball_info['time_interval']:.2f} FPS")
-        info_label.config(text=info_text)  # 更新信息标签
+        info_label.config(text=info_text)
         root.after(10, update_ball_info)  # 每100毫秒更新一次信息
 
     update_ball_info()  # 启动更新小球信息的循环
