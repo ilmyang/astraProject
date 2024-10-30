@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
+import numpy as np  # 确保引入 numpy 库
 
 # 初始化参数的默认值
 params = {
@@ -9,127 +10,91 @@ params = {
     'bilateral_d': 9,
     'bilateral_sigma_color': 75,
     'bilateral_sigma_space': 75,
-    'display_mode': 0,  # 0: 彩色图像, 1: 灰度图像, 2: HSV 图像
     'circularity_min': 0.85,
     'radius_min': 5,
     'radius_max': 30,
-    'lower_hsv': [0, 0, 100],
-    'upper_hsv': [83, 255, 255],
+    'lower_hsv': np.array([0, 0, 200]),  # 使用 numpy 数组
+    'upper_hsv': np.array([100, 255, 255]),  # 使用 numpy 数组
 }
 
-def update_parameters(callback, ball_info):
-    def on_trackbar_change(value, param_name):
+def update_callback(config, new_params):
+    # 确保参数在合适的范围内
+    config.blur_kernel = max(3, new_params['blur_kernel']) if new_params['blur_kernel'] % 2 == 1 else new_params['blur_kernel'] + 1
+    config.canny_low = max(10, min(100, new_params['canny_low']))
+    config.canny_high = max(100, min(300, new_params['canny_high']))
+    config.bilateral_d = max(1, min(15, new_params['bilateral_d']))
+    config.bilateral_sigma_color = max(50, min(150, new_params['bilateral_sigma_color']))
+    config.bilateral_sigma_space = max(50, min(150, new_params['bilateral_sigma_space']))
+
+    # 更新 lower_hsv 和 upper_hsv，确保它们是 numpy 数组
+    config.lower_hsv[:] = np.array(new_params['lower_hsv']) 
+    config.upper_hsv[:] = np.array(new_params['upper_hsv'])
+
+    # 新增参数处理
+    config.circularity_min = max(0.0, min(1.0, new_params['circularity_min']))
+    config.radius_min = max(1, new_params['radius_min'])
+    config.radius_max = max(config.radius_min, new_params['radius_max'])
+
+def update_parameters(config, ball_info):
+    def on_trackbar_change(value, param_name, index=None):
         try:
-            value = int(value)
-            if param_name == 'blur_kernel' and value % 2 == 0:
-                value += 1  # 确保高斯模糊内核大小是奇数
-            params[param_name] = value
-            callback(params)
+            if param_name == 'blur_kernel':
+                value = int(value)
+                if value % 2 == 0:
+                    value += 1  # 确保高斯模糊内核大小是奇数
+                params[param_name] = value
+            elif param_name in ['lower_hsv', 'upper_hsv']:
+                value = int(value)
+                params[param_name][index] = value  # 更新 numpy 数组中的值
+            elif param_name in ['canny_low', 'canny_high', 'bilateral_d', 'bilateral_sigma_color', 'bilateral_sigma_space', 'radius_min', 'radius_max']:
+                value = int(value)
+                params[param_name] = value  # 更新其他整数参数
+            elif param_name == 'circularity_min':
+                value = float(value)
+                params[param_name] = value  # 更新浮点数参数
+            else:
+                value = float(value)  # 如果有其他浮点数参数
+                params[param_name] = value
+    
+            print(f"Updating {param_name} to {value}")
+            update_callback(config, params)  # 调用回调函数更新参数
         except Exception as e:
             print(f"Error updating {param_name}: {e}")
 
-    def on_mode_change():
-        params['display_mode'] = mode_var.get()
-        callback(params)
+    def create_slider(root, text, from_, to, row, column, param_name, index=None, resolution=1):
+        ttk.Label(root, text=text).grid(row=row+1, column=column, padx=5, pady=0)
+        slider = tk.Scale(root, from_=from_, to=to, orient=tk.HORIZONTAL, resolution=resolution, command=lambda v: on_trackbar_change(v, param_name, index))
+        slider.set(params[param_name] if index is None else params[param_name][index])
+        slider.grid(row=row, column=column, padx=5, pady=0)
+        return slider
 
     # 创建主窗口
     root = tk.Tk()
     root.title("Parameter Adjustment")
 
     # 创建滑动条控件
-    ttk.Label(root, text="Blur Kernel Size").grid(row=1, column=0, padx=5, pady=0)
-    blur_slider = tk.Scale(root, from_=3, to=31, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'blur_kernel'))
-    blur_slider.set(params['blur_kernel'])
-    blur_slider.grid(row=0, column=0, padx=5, pady=0)
-
-    ttk.Label(root, text="Canny Low Threshold").grid(row=5, column=0, padx=5, pady=0)
-    canny_low_slider = tk.Scale(root, from_=10, to=100, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'canny_low'))
-    canny_low_slider.set(params['canny_low'])
-    canny_low_slider.grid(row=4, column=0, padx=5, pady=0)
-
-    ttk.Label(root, text="Canny High Threshold").grid(row=5, column=1, padx=5, pady=0)
-    canny_high_slider = tk.Scale(root, from_=100, to=300, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'canny_high'))
-    canny_high_slider.set(params['canny_high'])
-    canny_high_slider.grid(row=4, column=1, padx=5, pady=0)
-
-    ttk.Label(root, text="Bilateral Filter d").grid(row=7, column=0, padx=5, pady=0)
-    bilateral_d_slider = tk.Scale(root, from_=1, to=15, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'bilateral_d'))
-    bilateral_d_slider.set(params['bilateral_d'])
-    bilateral_d_slider.grid(row=6, column=0, padx=5, pady=0)
-
-    ttk.Label(root, text="Bilateral Sigma Color").grid(row=7, column=1, padx=5, pady=0)
-    bilateral_sigma_color_slider = tk.Scale(root, from_=50, to=150, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'bilateral_sigma_color'))
-    bilateral_sigma_color_slider.set(params['bilateral_sigma_color'])
-    bilateral_sigma_color_slider.grid(row=6, column=1, padx=5, pady=0)
-
-    ttk.Label(root, text="Bilateral Sigma Space").grid(row=7, column=2, padx=5, pady=0)
-    bilateral_sigma_space_slider = tk.Scale(root, from_=50, to=150, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'bilateral_sigma_space'))
-    bilateral_sigma_space_slider.set(params['bilateral_sigma_space'])
-    bilateral_sigma_space_slider.grid(row=6, column=2, padx=5, pady=0)
-
-    # 添加圆形度和半径参数
-    ttk.Label(root, text="Circularity Min").grid(row=1, column=1, padx=5, pady=0)
-    circularity_slider = tk.Scale(root, from_=0.0, to=1.0, resolution=0.01, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(float(v), 'circularity_min'))
-    circularity_slider.set(params['circularity_min'])
-    circularity_slider.grid(row=0, column=1, padx=5, pady=0)
-
-    ttk.Label(root, text="Radius Min").grid(row=3, column=0, padx=5, pady=0)
-    radius_min_slider = tk.Scale(root, from_=1, to=50, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(int(v), 'radius_min'))
-    radius_min_slider.set(params['radius_min'])
-    radius_min_slider.grid(row=2, column=0, padx=5, pady=0)
-
-    ttk.Label(root, text="Radius Max").grid(row=3, column=1, padx=5, pady=0)
-    radius_max_slider = tk.Scale(root, from_=1, to=50, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(int(v), 'radius_max'))
-    radius_max_slider.set(params['radius_max'])
-    radius_max_slider.grid(row=2, column=1, padx=5, pady=0)
-
-    # 添加lower_hsv和upper_hsv调节控件
-    ttk.Label(root, text="Lower HSV - H").grid(row=11, column=0, padx=5, pady=0)
-    lower_h_slider = tk.Scale(root, from_=0, to=255, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'lower_h'))
-    lower_h_slider.set(params.get('lower_hsv', [0, 100, 100])[0])
-    lower_h_slider.grid(row=10, column=0, padx=5, pady=0)
-
-    ttk.Label(root, text="Lower HSV - S").grid(row=11, column=1, padx=5, pady=0)
-    lower_s_slider = tk.Scale(root, from_=0, to=255, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'lower_s'))
-    lower_s_slider.set(params.get('lower_hsv', [0, 100, 100])[1])
-    lower_s_slider.grid(row=10, column=1, padx=5, pady=0)
-
-    ttk.Label(root, text="Lower HSV - V").grid(row=11, column=2, padx=5, pady=0)
-    lower_v_slider = tk.Scale(root, from_=0, to=255, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'lower_v'))
-    lower_v_slider.set(params.get('lower_hsv', [0, 100, 100])[2])
-    lower_v_slider.grid(row=10, column=2, padx=5, pady=0)
-
-    ttk.Label(root, text="Upper HSV - H").grid(row=13, column=0, padx=5, pady=0)
-    upper_h_slider = tk.Scale(root, from_=0, to=255, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'upper_h'))
-    upper_h_slider.set(params.get('upper_hsv', [30, 255, 255])[0])
-    upper_h_slider.grid(row=12, column=0, padx=5, pady=0)
-
-    ttk.Label(root, text="Upper HSV - S").grid(row=13, column=1, padx=5, pady=0)
-    upper_s_slider = tk.Scale(root, from_=0, to=255, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'upper_s'))
-    upper_s_slider.set(params.get('upper_hsv', [30, 255, 255])[1])
-    upper_s_slider.grid(row=12, column=1, padx=5, pady=0)
-
-    ttk.Label(root, text="Upper HSV - V").grid(row=13, column=2, padx=5, pady=0)
-    upper_v_slider = tk.Scale(root, from_=0, to=255, orient=tk.HORIZONTAL, command=lambda v: on_trackbar_change(v, 'upper_v'))
-    upper_v_slider.set(params.get('upper_hsv', [30, 255, 255])[2])
-    upper_v_slider.grid(row=12, column=2, padx=5, pady=0)
-
-
-    # 显示模式选择
-    mode_var = tk.IntVar(value=params['display_mode'])
-    #ttk.Label(root, text="Display Mode").grid(row=8, column=0, padx=5, pady=0)
-    mode_frame = ttk.Frame(root)
-    mode_frame.grid(row=8, column=1, padx=5, pady=0)
-    ttk.Radiobutton(mode_frame, text='Color', variable=mode_var, value=0, command=on_mode_change).pack(side=tk.LEFT)
-    ttk.Radiobutton(mode_frame, text='Gray', variable=mode_var, value=1, command=on_mode_change).pack(side=tk.LEFT)
-    ttk.Radiobutton(mode_frame, text='HSV', variable=mode_var, value=2, command=on_mode_change).pack(side=tk.LEFT)
+    create_slider(root, "Blur Kernel Size", 3, 31, 0, 0, 'blur_kernel')
+    create_slider(root, "Canny Low Threshold", 10, 100, 4, 0, 'canny_low')
+    create_slider(root, "Canny High Threshold", 100, 300, 4, 1, 'canny_high')
+    create_slider(root, "Bilateral Filter d", 1, 15, 6, 0, 'bilateral_d')
+    create_slider(root, "Bilateral Sigma Color", 50, 150, 6, 1, 'bilateral_sigma_color')
+    create_slider(root, "Bilateral Sigma Space", 50, 150, 6, 2, 'bilateral_sigma_space')
+    create_slider(root, "Circularity Min", 0.0, 1.0, 0, 1, 'circularity_min', resolution=0.01)
+    create_slider(root, "Radius Min", 1, 50, 2, 0, 'radius_min')
+    create_slider(root, "Radius Max", 1, 50, 2, 1, 'radius_max')
+    create_slider(root, "Lower HSV - H", 0, 255, 10, 0, 'lower_hsv', 0)
+    create_slider(root, "Lower HSV - S", 0, 255, 10, 1, 'lower_hsv', 1)
+    create_slider(root, "Lower HSV - V", 0, 255, 10, 2, 'lower_hsv', 2)
+    create_slider(root, "Upper HSV - H", 0, 255, 12, 0, 'upper_hsv', 0)
+    create_slider(root, "Upper HSV - S", 0, 255, 12, 1, 'upper_hsv', 1)
+    create_slider(root, "Upper HSV - V", 0, 255, 12, 2, 'upper_hsv', 2)
 
     # 添加新的行来显示小球信息
     info_frame = ttk.Frame(root)
     info_frame.grid(row=9, columnspan=2, pady=10)
 
     # 创建一个标签来显示小球信息
-    info_label = ttk.Label(info_frame, text="Position: (0, 0), Radius: 0, Circularity: 0, Frame Rate: 0 FPS", wraplength=300, anchor='w')
+    info_label = ttk.Label(info_frame, text="Position: (0, 0), Radius: 0, Circularity: 0, Frame Rate: 0 FPS", wraplength=300, anchor='w', width=50)
     info_label.grid(row=9, column=1, padx=5)
 
     # 更新小球信息的函数
@@ -144,5 +109,5 @@ def update_parameters(callback, ball_info):
         root.after(10, update_ball_info)  # 每100毫秒更新一次信息
 
     update_ball_info()  # 启动更新小球信息的循环
-
+    print(f"radius_min: {params['radius_min']}, radius_max: {params['radius_max']}")
     root.mainloop()
