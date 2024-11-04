@@ -7,6 +7,7 @@ import queue
 import time
 import os
 from gui import update_parameters
+from sklearn.cluster import KMeans
 
 class BallDetector:
     def __init__(self):
@@ -32,7 +33,7 @@ class BallDetector:
         }
         
         # 定义保存图像的间隔时间（秒）
-        self.save_interval = 5
+        self.save_interval = 1
         self.last_save_time = time.time()
         self.last_time = time.time()
 
@@ -51,9 +52,9 @@ class BallDetector:
         binary_output[mask > 0] = 255  # 将符合HSV范围的区域设置为白色
 
         # ROI - 使用特定的值来定义ROI区域
-        x_start = 80    # 左上角 x 坐标
+        x_start = 0    # 左上角 x 坐标
         y_start = 0    # 左上角 y 坐标
-        x_end = 540       # 右下角 x 坐标
+        x_end = 640       # 右下角 x 坐标
         y_end = 480      # 右下角 y 坐标
 
         roi = binary_output[y_start:y_end, x_start:x_end]
@@ -66,12 +67,18 @@ class BallDetector:
         
         return binary_output, filtered_image, x_offset, y_offset
 
+    
     def detect(self, frame):
         binary_output, preprocessed_image, x_offset, y_offset = self.preprocess(frame)
         edges = cv2.Canny(preprocessed_image, self.canny_low, self.canny_high)
-
+    
         contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
+        hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        
+        ball_positions = []
+        hsv_values = []
+    
         for contour in contours:
             area = cv2.contourArea(contour)
             if area < math.pi * self.radius_min * self.radius_min or area > math.pi * self.radius_max * self.radius_max:
@@ -85,38 +92,57 @@ class BallDetector:
                 if self.radius_min < radius < self.radius_max:
                     x_global = x + x_offset
                     y_global = y + y_offset
-                    self.ball_info['position'] = (int(x_global), int(y_global))
-                    self.ball_info['radius'] = int(radius)
-                    self.ball_info['circularity'] = circularity
-
-                    # 获取中心像素的HSV值
-                    if int(y_global) < frame.shape[0] and int(x_global) < frame.shape[1]:
-                        hsv_value = frame[int(y_global), int(x_global)] if len(frame.shape) == 3 else (0, 0, 0)
-                    else:
-                        hsv_value = (0, 0, 0)
-                    self.ball_info['hsv'] = hsv_value
-
-                    # 计算帧率
-                    current_time = time.time()
-                    if self.last_time != current_time:  # 防止除以零
-                        self.ball_info['time_interval'] = 1 / (current_time - self.last_time)
-                    self.last_time = current_time
                     center = (int(x_global), int(y_global))
-                    cv2.circle(frame, center, int(radius), (0, 0, 255), 2)
-
+    
+                    # 获取小球中心像素的HSV值
+                    if 0 <= int(y_global) < hsv_frame.shape[0] and 0 <= int(x_global) < hsv_frame.shape[1]:
+                        hsv_value = hsv_frame[int(y_global), int(x_global)]
+                        hsv_values.append(hsv_value)
+                        ball_positions.append((center, int(radius)))
+                    else:
+                        continue
+    
+        # 如果检测到足够的小球
+        if len(hsv_values) >= 2:
+            hsv_values_np = np.array(hsv_values)
+            # 使用KMeans聚类
+            kmeans = KMeans(n_clusters=2)
+            labels = kmeans.fit_predict(hsv_values_np)
+    
+            # 统计每个簇的数量
+            counts = np.bincount(labels)
+            # 找到包含4个小球的簇索引
+            blue_cluster_index = np.argmax(counts)
+            yellow_cluster_index = 1 - blue_cluster_index
+    
+            for idx, (center, radius) in enumerate(ball_positions):
+                if labels[idx] == yellow_cluster_index:
+                    # 标记黄色小球
+                    cv2.circle(frame, center, radius, (0, 0, 255), 2)
+                    self.ball_info['position'] = center
+                    self.ball_info['radius'] = radius
+                else:
+                    # 标记蓝色小球
+                    cv2.circle(frame, center, radius, (255, 0, 0), 2)
+        else:
+            # 当无法聚类时，标记为未识别
+            for (center, radius) in ball_positions:
+                cv2.circle(frame, center, radius, (0, 0, 255), 2)
+    
         return binary_output, frame
     
     def mouse_callback(self, event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
-            print(f"鼠标点击坐标：({x}, {y})")
+            hsv_frame = cv2.cvtColor(param, cv2.COLOR_BGR2HSV)
+            hsv_value = hsv_frame[y, x]
+            print(f"鼠标点击坐标：({x}, {y}), HSV值：{hsv_value}")
 
     def process_frame(self, frame):
         # 检测符合HSV的小球区域并显示
         binary_output, processed_frame = self.detect(frame)
         cv2.imshow('Preprocessed Image', binary_output)
         cv2.imshow('Display', processed_frame)
-        cv2.setMouseCallback('Display', self.mouse_callback)
-        
+        cv2.setMouseCallback('Display', self.mouse_callback, frame)        
         # 检查是否需要保存图像
         current_time = time.time()
         if current_time - self.last_save_time >= self.save_interval:
