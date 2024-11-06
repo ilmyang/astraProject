@@ -35,7 +35,7 @@ def update_callback(config, new_params):
     config.radius_min = max(1, new_params['radius_min'])
     config.radius_max = max(config.radius_min, new_params['radius_max'])
 
-def update_parameters(config, ball_info):
+def update_parameters(config):
     def on_trackbar_change(value, param_name, index=None):
         try:
             if param_name == 'blur_kernel':
@@ -55,12 +55,12 @@ def update_parameters(config, ball_info):
             else:
                 value = float(value)  # 如果有其他浮点数参数
                 params[param_name] = value
-    
+        
             print(f"Updating {param_name} to {value}")
             update_callback(config, params)  # 调用回调函数更新参数
         except Exception as e:
             print(f"Error updating {param_name}: {e}")
-
+    
     def create_slider(root, text, from_, to, row, column, param_name, index=None, resolution=1):
         ttk.Label(root, text=text).grid(row=row+1, column=column, padx=5, pady=0)
         slider = tk.Scale(root, from_=from_, to=to, orient=tk.HORIZONTAL, resolution=resolution, command=lambda v: on_trackbar_change(v, param_name, index))
@@ -89,25 +89,4 @@ def update_parameters(config, ball_info):
     create_slider(root, "Upper HSV - S", 0, 255, 12, 1, 'upper_hsv', 1)
     create_slider(root, "Upper HSV - V", 0, 255, 12, 2, 'upper_hsv', 2)
 
-    # 添加新的行来显示小球信息
-    info_frame = ttk.Frame(root)
-    info_frame.grid(row=9, columnspan=2, pady=10)
-
-    # 创建一个标签来显示小球信息
-    info_label = ttk.Label(info_frame, text="Position: (0, 0), Radius: 0, Circularity: 0, Frame Rate: 0 FPS", wraplength=300, anchor='w', width=50)
-    info_label.grid(row=9, column=1, padx=5)
-
-    # 更新小球信息的函数
-    def update_ball_info():
-        hsv_value = ball_info.get('hsv', (0, 0, 0))
-        info_text = (f"Position: {ball_info['position']}, "
-                     f"Radius: {ball_info['radius']}, "
-                     f"Circularity: {ball_info['circularity']:.2f}, "
-                     f"HSV: {hsv_value}, "
-                     f"Frame Rate: {ball_info['time_interval']:.2f} FPS")
-        info_label.config(text=info_text)
-        root.after(10, update_ball_info)  # 每100毫秒更新一次信息
-
-    update_ball_info()  # 启动更新小球信息的循环
-    print(f"radius_min: {params['radius_min']}, radius_max: {params['radius_max']}")
     root.mainloop()
