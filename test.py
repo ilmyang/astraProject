@@ -180,10 +180,8 @@ class BallDetector:
         return frame
 
     def output_ball_info(self):
-        #os.system('cls')  # 清空终端（适用于Windows）
-        
-        # 输出小球信息
-                # 简化后的小球输出
+        #os.system('cls')  # 清空终端
+
         for ball in self.ball_info:
             position = ball['position']
             radius = ball['radius']
